@@ -1,125 +1,127 @@
 
 from flask import Flask, render_template, request, redirect, url_for
+import matplotlib.pyplot as plt
+import os
+import json
+from datetime import datetime
 
 app = Flask(__name__)
+os.makedirs('./static/stats', exist_ok=True)
 
-# Game data
-games = ["501", "301", "Mickey Mouse", "Footy", "Scoring Mouse Singles"]
+# Data storage
 players = []
+player_stats = {}  # Key: player, Value: detailed stats
+matches = []
 current_game = None
-scores = {}
-targets = [20, 19, 18, 17, 16, 15]  # Default targets for Scoring Mouse Singles
-progress = {}  # Tracks players' progress on targets
+match_data = {"scores": [], "checkouts": [], "high_scores": []}
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def home():
+    return '''
+    <h1>Darts Application</h1>
+    <a href="/new-match">Start New Match</a> | <a href="/players">View Player Stats</a>
+    '''
+
+@app.route("/new-match", methods=["GET", "POST"])
+def new_match():
+    global current_game, players, match_data
     if request.method == "POST":
-        global current_game
+        players = request.form.getlist("players")
         current_game = request.form.get("game")
-        return redirect(url_for("player_setup"))
+        match_data = {"scores": {player: [] for player in players}, "checkouts": [], "high_scores": {60: 0, 80: 0, 100: 0, 140: 0, 180: 0}}
+        return redirect(url_for("match"))
     return '''
     <form method="POST">
-        <h1>Select Game</h1>
+        <label>Game Type:</label>
         <select name="game">
             <option value="501">501</option>
-            <option value="301">301</option>
-            <option value="Mickey Mouse">Mickey Mouse</option>
-            <option value="Footy">Footy</option>
-            <option value="Scoring Mouse Singles">Scoring Mouse Singles</option>
         </select>
-        <button type="submit">Next</button>
+        <label>Players:</label>
+        <input type="text" name="players" placeholder="Player 1, Player 2">
+        <button type="submit">Start Match</button>
     </form>
     '''
 
-@app.route("/setup", methods=["GET", "POST"])
-def player_setup():
-    global players, scores, progress
+@app.route("/match", methods=["GET", "POST"])
+def match():
     if request.method == "POST":
-        players = request.form.getlist("player")
-        if current_game == "Scoring Mouse Singles":
-            progress = {player: {target: 0 for target in targets} for player in players}
-        else:
-            scores = {player: 501 if current_game == "501" else 301 for player in players}
-        return redirect(url_for("scoreboard"))
-    return '''
+        for player in players:
+            scores = request.form.getlist(f"{player}_scores")
+            match_data["scores"][player].extend([int(score) for score in scores if score.isdigit()])
+        return redirect(url_for("match"))
+
+    scoreboard = "".join([f"<h3>{player}: {sum(match_data['scores'][player])}</h3>" for player in players])
+    return f'''
+    <h1>Match in Progress</h1>
     <form method="POST">
-        <h1>Enter Players</h1>
-        <input type="text" name="player" placeholder="Player 1">
-        <input type="text" name="player" placeholder="Player 2">
-        <button type="submit">Start Game</button>
+        {''.join([f'<label>{player}:</label> <input type="text" name="{player}_scores" placeholder="Enter scores (comma separated)"> <br>' for player in players])}
+        <button type="submit">Update Scores</button>
     </form>
+    {scoreboard}
+    <a href="/match-summary">End Match</a>
     '''
 
-@app.route("/scoreboard", methods=["GET", "POST"])
-def scoreboard():
-    global scores, progress
-    if current_game == "Scoring Mouse Singles":
-        if request.method == "POST":
-            for player in players:
-                for target in targets:
-                    triple_hits = int(request.form.get(f"{player}_{target}_triple", 0)) * 3
-                    double_hits = int(request.form.get(f"{player}_{target}_double", 0)) * 2
-                    bed_hits = int(request.form.get(f"{player}_{target}_bed", 0))
-                    single_bull = int(request.form.get(f"{player}_bull_single", 0))
-                    double_bull = int(request.form.get(f"{player}_bull_double", 0)) * 2
-                    total_hits = triple_hits + double_hits + bed_hits + single_bull + double_bull
-                    progress[player][target] = min(progress[player][target] + total_hits, 3)
-            return redirect(url_for("scoreboard"))
-        progress_table = "<br>".join([
-            f"<p>{player}: " + ", ".join([f"{target}: {progress[player][target]}/3" for target in targets]) + "</p>"
-            for player in players
-        ])
-        return f'''
-        <h1>Scoring Mouse Singles</h1>
-        <form method="POST">
-            {progress_table}
-            {"".join([f"<p>{player}: " + "".join([f"<input type='number' name='{player}_{target}_triple' placeholder='Triple {target}'>"
-                                                  f"<input type='number' name='{player}_{target}_double' placeholder='Double {target}'>"
-                                                  f"<input type='number' name='{player}_{target}_bed' placeholder='Beds {target}'>" 
-                                                  for target in targets]) + 
-                      f"<input type='number' name='{player}_bull_single' placeholder='Single Bull'>"
-                      f"<input type='number' name='{player}_bull_double' placeholder='Double Bull'></p>" 
-                      for player in players])}
-            <button type="submit">Update Scores</button>
-        </form>
-        <a href="/results">Finish Game</a>
-        '''
-    else:
-        if request.method == "POST":
-            for player in scores:
-                reduction = int(request.form.get(player, 0))
-                scores[player] = max(0, scores[player] - reduction)
-            return redirect(url_for("scoreboard"))
-        score_table = ''.join([f"<p>{player}: {score}</p>" for player, score in scores.items()])
-        return f'''
-        <h1>Scoreboard</h1>
-        <form method="POST">
-            {score_table}
-            {"".join([f"<input type='number' name='{player}' placeholder='Score for {player}'>" for player in scores])}
-            <button type="submit">Update</button>
-        </form>
-        <a href="/results">Finish Game</a>
-        '''
+@app.route("/match-summary", methods=["GET"])
+def match_summary():
+    global player_stats
+    # Update player stats
+    for player in players:
+        scores = match_data["scores"][player]
+        total_score = sum(scores)
+        first_three_avg = sum(scores[:3]) / 3 if scores[:3] else 0
+        overall_avg = sum(scores) / len(scores) if scores else 0
 
-@app.route("/results")
-def results():
-    global scores, progress
-    if current_game == "Scoring Mouse Singles":
-        winner = max(players, key=lambda player: sum(1 for target in targets if progress[player][target] == 3))
-        return f'''
-        <h1>Game Over</h1>
-        <p>Winner: {winner}</p>
-        <p>Final Progress: {progress}</p>
-        <a href="/">Restart</a>
-        '''
-    else:
-        winner = min(scores, key=scores.get)
-        return f'''
-        <h1>Game Over</h1>
-        <p>Winner: {winner}</p>
-        <p>Final Scores: {scores}</p>
-        <a href="/">Restart</a>
-        '''
+        # High scores tracking
+        for high in [60, 80, 100, 140, 180]:
+            match_data["high_scores"][high] += sum(1 for score in scores if score >= high)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+        # Update player stats
+        if player not in player_stats:
+            player_stats[player] = {"total_games": 0, "total_score": 0, "first_three_avg": 0, "overall_avg": 0, "high_scores": {60: 0, 80: 0, 100: 0, 140: 0, 180: 0}}
+        stats = player_stats[player]
+        stats["total_games"] += 1
+        stats["total_score"] += total_score
+        stats["first_three_avg"] = (stats["first_three_avg"] + first_three_avg) / stats["total_games"]
+        stats["overall_avg"] = (stats["overall_avg"] + overall_avg) / stats["total_games"]
+        for high in [60, 80, 100, 140, 180]:
+            stats["high_scores"][high] += match_data["high_scores"][high]
+
+    # Save stats
+    with open("player_stats.json", "w") as f:
+        json.dump(player_stats, f)
+
+    return '''
+    <h1>Match Summary</h1>
+    <a href="/players">View Player Stats</a>
+    '''
+
+@app.route("/players")
+def players_page():
+    player_stats_html = "".join([
+        f"<h3>{player}</h3><ul><li>Games Played: {stats['total_games']}</li><li>First Three Avg: {stats['first_three_avg']}</li><li>Overall Avg: {stats['overall_avg']}</li><li>High Scores: {stats['high_scores']}</li></ul>"
+        for player, stats in player_stats.items()
+    ])
+    return f'''
+    <h1>Player Stats</h1>
+    {player_stats_html}
+    <a href="/">Back to Home</a>
+    '''
+
+@app.route("/generate-stats")
+def generate_stats():
+    # Generate a sample bar chart
+    players = list(player_stats.keys())
+    scores = [player_stats[player]["total_score"] for player in players]
+
+    plt.bar(players, scores)
+    plt.title("Total Scores by Player")
+    plt.xlabel("Players")
+    plt.ylabel("Total Scores")
+    plt.savefig("./static/stats/total_scores.png")
+    plt.close()
+
+    return '''
+    <h1>Stats Generated</h1>
+    <img src="/static/stats/total_scores.png">
+    <a href="/">Back to Home</a>
+    '''
