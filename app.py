@@ -57,8 +57,13 @@ def scoreboard():
         if request.method == "POST":
             for player in players:
                 for target in targets:
-                    hits = int(request.form.get(f"{player}_{target}", 0))
-                    progress[player][target] = min(progress[player][target] + hits, 3)
+                    triple_hits = int(request.form.get(f"{player}_{target}_triple", 0)) * 3
+                    double_hits = int(request.form.get(f"{player}_{target}_double", 0)) * 2
+                    bed_hits = int(request.form.get(f"{player}_{target}_bed", 0))
+                    single_bull = int(request.form.get(f"{player}_bull_single", 0))
+                    double_bull = int(request.form.get(f"{player}_bull_double", 0)) * 2
+                    total_hits = triple_hits + double_hits + bed_hits + single_bull + double_bull
+                    progress[player][target] = min(progress[player][target] + total_hits, 3)
             return redirect(url_for("scoreboard"))
         progress_table = "<br>".join([
             f"<p>{player}: " + ", ".join([f"{target}: {progress[player][target]}/3" for target in targets]) + "</p>"
@@ -68,7 +73,13 @@ def scoreboard():
         <h1>Scoring Mouse Singles</h1>
         <form method="POST">
             {progress_table}
-            {"".join([f"<p>{player}: " + "".join([f"<input type='number' name='{player}_{target}' placeholder='{target} hits'>" for target in targets]) + "</p>" for player in players])}
+            {"".join([f"<p>{player}: " + "".join([f"<input type='number' name='{player}_{target}_triple' placeholder='Triple {target}'>"
+                                                  f"<input type='number' name='{player}_{target}_double' placeholder='Double {target}'>"
+                                                  f"<input type='number' name='{player}_{target}_bed' placeholder='Beds {target}'>" 
+                                                  for target in targets]) + 
+                      f"<input type='number' name='{player}_bull_single' placeholder='Single Bull'>"
+                      f"<input type='number' name='{player}_bull_double' placeholder='Double Bull'></p>" 
+                      for player in players])}
             <button type="submit">Update Scores</button>
         </form>
         <a href="/results">Finish Game</a>
